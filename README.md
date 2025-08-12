@@ -56,64 +56,81 @@
 
 ### 1️⃣ Clone the Repository
 
-
+```bash
 git clone https://github.com/yourusername/strategic-talent-migration.git
-
+```
 cd strategic-talent-migration
 
 ### 2️⃣ Create a Virtual Environment
 
-
+```bash
 python3 -m venv .venv
+```
 #### Activate the virtual environment:
 #### Mac/Linux:
 
+```bash
 source .venv/bin/activate
-#### Windows (PowerShell):
-.venv\Scripts\activate
+```
 
+#### Windows (PowerShell):
+```bash
+.venv\Scripts\activate
+```
 ### 3️⃣ Install Dependencies
 
+```bash
 pip install -r requirements.txt
+```
 #### If you don't have requirements.txt, generate it:
-```pip install pandas numpy streamlit plotly openpyxl pyarrow fastparquet
-pip freeze > requirements.txt
+
+```bash
+pip install pandas numpy streamlit plotly openpyxl pyarrow fastparquet pip freeze > requirements.txt
+```
 
 ### 🛠 Running the Project
 Step 1 — ETL Processing
 Run the ETL script to:
-Load raw Excel LCA files from data/
-Standardize fields and formats
-Deduplicate cases
-Save cleaned data in CSV and Parquet
+- Load raw Excel LCA files from data/
+- Standardize fields and formats
+- Deduplicate cases
+- Save cleaned data in CSV and Parquet
+```bash
 python etl_lca.py
+```
 Expected output:
+```yaml
 Reading: data/LCA_Disclosure_Data_FY2024_Q1.xlsx
 Reading: data/LCA_Disclosure_Data_FY2023_Q4.xlsx
 Rows after merge & dedup: 226,843
 Saved: data/lca_merged_clean.csv
 Saved: data/lca_merged_clean.parquet
+```
 Step 2 — Launch the Dashboard
+```bash
 streamlit run app.py
+```
 The interactive dashboard will open in your browser at:
+```bash
 http://localhost:8501
-🖥 Dashboard Usage
-Select Year Type — Calendar or Fiscal.
-Choose Filters — State and/or employer name.
-View KPIs — Total filings, unique employers, median wage.
-Explore Visualizations:
-Top-25 employers by LCA filings
-Filings by state
-Wage distribution histogram
-Monthly filing trends
-Check Data Coverage — See available years in diagnostics.
-📌 Notes
-Data source: U.S. Department of Labor — Office of Foreign Labor Certification (OFLC) LCA Disclosure Data.
-Place raw Excel files in the data/ directory before running ETL.
-Fiscal year logic:
-Oct–Dec → next year
-Jan–Sep → current year
-📄 License
+```
+### 🖥 Dashboard Usage
+- Select Year Type — Calendar or Fiscal.
+- Choose Filters — State and/or employer name.
+- View KPIs — Total filings, unique employers, median wage.
+- Explore Visualizations:
+  - Top-25 employers by LCA filings
+  - Filings by state
+  - Wage distribution histogram
+  - Monthly filing trends
+- Check Data Coverage — See available years in diagnostics.
+### 📌 Notes
+- Data source: U.S. Department of Labor — Office of Foreign Labor Certification (OFLC) LCA Disclosure Data.
+- Place raw Excel files in the data/ directory before running ETL.
+- Fiscal year logic:
+  - Oct–Dec → next year
+  - Jan–Sep → current year
+### 📄 License
 Provided for research and analysis purposes.
 For commercial use, ensure compliance with U.S. Department of Labor data policies.
 

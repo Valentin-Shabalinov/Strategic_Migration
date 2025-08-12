@@ -22,7 +22,6 @@ OUT_CSV = DATA_DIR / "lca_merged_clean.csv"
 OUT_PARQUET = DATA_DIR / "lca_merged_clean.parquet"
 
 # ------------------- TARGET COLUMNS -------------------
-# These are the final columns we want in our cleaned dataset
 TARGET_COLS = [
     "CASE_NUMBER","CASE_STATUS","RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE",
     "VISA_CLASS","JOB_TITLE","SOC_CODE","SOC_TITLE","FULL_TIME_POSITION",
@@ -37,27 +36,14 @@ TARGET_COLS = [
     "TOTAL_WORKSITE_LOCATIONS"
 ]
 
-# Excel load optimization — FEIN may be missing in some datasets
-USECOLS = [c for c in TARGET_COLS if c not in {"EMPLOYER_FEIN"}]
-
-# ------------------- FUNCTION: Load a Single File -------------------
 def load_one(path: Path, source_tag: str) -> pd.DataFrame:
     """
-    Loads one Excel file, cleans and standardizes columns, ensures required fields exist,
-    and calculates helper columns for downstream analysis.
-    
-    Args:
-        path (Path): Path to Excel file
-        source_tag (str): Label to indicate data source (e.g., FY2024_Q1)
-    
-    Returns:
-        pd.DataFrame: Cleaned DataFrame with standard columns
+    Load one Excel file, standardize columns, ensure required fields, and compute helpers.
     """
-    # Load all columns from Excel (names may have different cases)
     df = pd.read_excel(path, engine="openpyxl", usecols=lambda c: True)
     df.columns = [str(c).strip().upper() for c in df.columns]
 
-    # Force specific columns to string to preserve formatting (e.g., leading zeros in ZIP/SOC codes)
+    # Force specific columns to string to preserve formatting (e.g., ZIP/SOC leading zeros)
     TEXT_FORCE = [
         "CASE_NUMBER","CASE_STATUS","VISA_CLASS","JOB_TITLE","SOC_CODE","SOC_TITLE",
         "FULL_TIME_POSITION","EMPLOYER_NAME","EMPLOYER_CITY","EMPLOYER_STATE",
@@ -69,19 +55,19 @@ def load_one(path: Path, source_tag: str) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].astype("string")
 
-    # Add missing TARGET_COLS as NaN if not present
+    # Ensure all target columns exist
     for col in TARGET_COLS:
         if col not in df.columns:
             df[col] = np.nan
 
-    # Keep only TARGET_COLS in correct order
+    # Keep only target columns
     df = df[TARGET_COLS].copy()
 
-    # Convert date columns
+    # Dates
     for col in ["RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE","BEGIN_DATE","END_DATE"]:
         df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    # Convert numeric columns
+    # Numerics
     num_cols = [
         "TOTAL_WORKER_POSITIONS","NEW_EMPLOYMENT","CONTINUED_EMPLOYMENT",
         "CHANGE_PREVIOUS_EMPLOYMENT","NEW_CONCURRENT_EMPLOYMENT","CHANGE_EMPLOYER",
@@ -91,26 +77,23 @@ def load_one(path: Path, source_tag: str) -> pd.DataFrame:
     for col in num_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Add source tag column
+    # Source tag
     df["SOURCE"] = source_tag
 
-    # ------------------- CALCULATED FIELDS -------------------
-    # Primary date = first available date from these columns
+    # Primary date (first available)
     date_cols = ["RECEIVED_DATE","DECISION_DATE","BEGIN_DATE","ORIGINAL_CERT_DATE","END_DATE"]
     df["PRIMARY_DATE"] = pd.NaT
     for c in date_cols:
         df["PRIMARY_DATE"] = df["PRIMARY_DATE"].fillna(df[c])
 
-    # Calendar year and month
+    # Calendar / Fiscal helpers
     df["RECEIVED_YEAR"]  = df["PRIMARY_DATE"].dt.year
     df["RECEIVED_MONTH"] = df["PRIMARY_DATE"].dt.to_period("M").astype("string")
-
-    # Fiscal year (starts in October)
     m = df["PRIMARY_DATE"].dt.month
     y = df["PRIMARY_DATE"].dt.year
     df["FISCAL_YEAR"] = np.where(m >= 10, y + 1, y)
 
-    # Combined location fields
+    # Locations
     df["WORKSITE_LOCATION"] = (
         df["WORKSITE_CITY"].astype("string").fillna("") + ", " +
         df["WORKSITE_STATE"].astype("string").fillna("")
@@ -122,29 +105,19 @@ def load_one(path: Path, source_tag: str) -> pd.DataFrame:
 
     return df
 
-# ------------------- MAIN PIPELINE -------------------
 def main():
-    """
-    Reads multiple quarterly datasets, merges them into one,
-    deduplicates by CASE_NUMBER (keeping the most recent decision),
-    and saves the clean dataset as CSV and Parquet.
-    """
-    # List of source files (modify this list as new files are added)
     srcs = [
         (DATA_DIR / "LCA_Disclosure_Data_FY2024_Q1.xlsx", "FY2024_Q1"),
         (DATA_DIR / "LCA_Disclosure_Data_FY2023_Q4.xlsx", "FY2023_Q4"),
     ]
     frames = []
-
-    # Load all sources
     for path, tag in srcs:
         print(f"Reading: {path}")
         frames.append(load_one(path, tag))
 
-    # Merge all datasets
     merged = pd.concat(frames, ignore_index=True)
 
-    # Deduplicate by CASE_NUMBER, keeping the latest DECISION_DATE (or RECEIVED_DATE if missing)
+    # Deduplicate by CASE_NUMBER, keep latest decision (or received) date
     merged["_sort_key"] = merged["DECISION_DATE"].fillna(merged["RECEIVED_DATE"])
     merged = (
         merged.sort_values("_sort_key")
@@ -154,21 +127,19 @@ def main():
 
     print(f"Rows after merge & deduplication: {len(merged):,}")
 
-    # ------------------- SAVE OUTPUT -------------------
-    # Save as CSV
+    # Save CSV
     merged.to_csv(OUT_CSV, index=False)
 
-    # Ensure string columns are proper pandas string dtype before saving to Parquet
+    # Normalize strings for Parquet
     for c in merged.columns:
         if pd.api.types.is_object_dtype(merged[c]) or pd.api.types.is_string_dtype(merged[c]):
             merged[c] = merged[c].astype("string")
 
-    # Save as compressed Parquet for faster future loads
+    # Save Parquet
     merged.to_parquet(OUT_PARQUET, index=False, compression="snappy")
 
     print(f"Saved: {OUT_CSV}")
     print(f"Saved: {OUT_PARQUET}")
 
-# ------------------- SCRIPT ENTRY POINT -------------------
 if __name__ == "__main__":
     main()
