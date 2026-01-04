@@ -34,63 +34,123 @@ def norm_text(x: str) -> str:
     return x
 
 # ------------------- LOAD DATA FUNCTION -------------------
-@st.cache_data
+
+@st.cache_data(show_spinner="Loading LCA dataset…")
 def load_data():
-    """
-    Loads the LCA dataset from Parquet (preferred) or CSV (fallback) and
-    computes helpers (PRIMARY_DATE, RECEIVED_YEAR, FISCAL_YEAR, normalized fields, annual wage).
-    """
-    if DATA_PARQUET.exists():
-        df = pd.read_parquet(DATA_PARQUET)
-    else:
-        date_cols = ["RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE","BEGIN_DATE","END_DATE"]
-        df = pd.read_csv(
-            DATA_CSV,
-            parse_dates=[c for c in date_cols if c in pd.read_csv(DATA_CSV, nrows=0).columns]
-        )
+    if not DATA_PARQUET.exists():
+        st.error("Parquet not found: data/lca_merged_clean.parquet")
+        st.stop()
+
+    df = pd.read_parquet(DATA_PARQUET)
 
     # PRIMARY_DATE
     if "PRIMARY_DATE" not in df.columns:
-        date_cols = ["RECEIVED_DATE","DECISION_DATE","BEGIN_DATE","ORIGINAL_CERT_DATE","END_DATE"]
+        cols = [c for c in ["RECEIVED_DATE","DECISION_DATE","BEGIN_DATE","ORIGINAL_CERT_DATE","END_DATE"] if c in df.columns]
         df["PRIMARY_DATE"] = pd.NaT
-        for c in date_cols:
-            if c in df.columns:
-                df["PRIMARY_DATE"] = df["PRIMARY_DATE"].fillna(df[c])
+        for c in cols:
+            df["PRIMARY_DATE"] = df["PRIMARY_DATE"].fillna(df[c])
 
     # Calendar helpers
     if "RECEIVED_YEAR" not in df.columns or df["RECEIVED_YEAR"].isna().all():
-        df["RECEIVED_YEAR"]  = df["PRIMARY_DATE"].dt.year
+        df["RECEIVED_YEAR"] = df["PRIMARY_DATE"].dt.year
         df["RECEIVED_MONTH"] = df["PRIMARY_DATE"].dt.to_period("M").astype("string")
 
-    # Fiscal year helper
+    # Fiscal year
     if "FISCAL_YEAR" not in df.columns or df["FISCAL_YEAR"].isna().all():
         m = df["PRIMARY_DATE"].dt.month
         y = df["PRIMARY_DATE"].dt.year
         df["FISCAL_YEAR"] = np.where(m >= 10, y + 1, y)
 
-    # Normalized names
-    if "EMPLOYER_NAME" in df.columns and "EMPLOYER_NAME_NORM" not in df.columns:
-        df["EMPLOYER_NAME_NORM"] = df["EMPLOYER_NAME"].apply(norm_text)
-    if "JOB_TITLE" in df.columns and "JOB_TITLE_NORM" not in df.columns:
-        df["JOB_TITLE_NORM"] = df["JOB_TITLE"].apply(norm_text)
-    if "SOC_TITLE" in df.columns and "SOC_TITLE_NORM" not in df.columns:
-        df["SOC_TITLE_NORM"] = df["SOC_TITLE"].apply(norm_text)
+    # Normalization (vectorized)
+    def norm_series(s: pd.Series) -> pd.Series:
+        s = s.fillna("").astype(str).str.strip().str.upper()
+        return s.str.replace(r"\s+", " ", regex=True)
 
-    # Annual wage
+    if "EMPLOYER_NAME" in df.columns and "EMPLOYER_NAME_NORM" not in df.columns:
+        df["EMPLOYER_NAME_NORM"] = norm_series(df["EMPLOYER_NAME"])
+    if "JOB_TITLE" in df.columns and "JOB_TITLE_NORM" not in df.columns:
+        df["JOB_TITLE_NORM"] = norm_series(df["JOB_TITLE"])
+    if "SOC_TITLE" in df.columns and "SOC_TITLE_NORM" not in df.columns:
+        df["SOC_TITLE_NORM"] = norm_series(df["SOC_TITLE"])
+
+    # Annual wage (vectorized)
     if "WAGE_ANNUAL_FROM" not in df.columns:
-        def annualize(row):
-            v = row.get("WAGE_RATE_OF_PAY_FROM")
-            if pd.isna(v): return pd.NA
-            unit = str(row.get("WAGE_UNIT_OF_PAY", "")).lower()
-            if "hour" in unit:   return float(v) * 2080
-            if "week" in unit:   return float(v) * 52
-            if "bi" in unit:     return float(v) * 26
-            if "month" in unit:  return float(v) * 12
-            if "year" in unit:   return float(v)
-            return pd.NA
-        df["WAGE_ANNUAL_FROM"] = df.apply(annualize, axis=1)
+        v = pd.to_numeric(df.get("WAGE_RATE_OF_PAY_FROM"), errors="coerce")
+        unit = df.get("WAGE_UNIT_OF_PAY").astype(str).str.lower()
+
+        mult = np.select(
+            [
+                unit.str.contains("hour", na=False),
+                unit.str.contains("week", na=False),
+                unit.str.contains("bi",   na=False),
+                unit.str.contains("month",na=False),
+                unit.str.contains("year", na=False),
+            ],
+            [2080, 52, 26, 12, 1],
+            default=np.nan
+        )
+        df["WAGE_ANNUAL_FROM"] = v * mult
 
     return df
+
+
+# @st.cache_data
+# def load_data():
+#     """
+#     Loads the LCA dataset from Parquet (preferred) or CSV (fallback) and
+#     computes helpers (PRIMARY_DATE, RECEIVED_YEAR, FISCAL_YEAR, normalized fields, annual wage).
+#     """
+#     if DATA_PARQUET.exists():
+#         df = pd.read_parquet(DATA_PARQUET)
+#     else:
+#         date_cols = ["RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE","BEGIN_DATE","END_DATE"]
+#         df = pd.read_csv(
+#             DATA_CSV,
+#             parse_dates=[c for c in date_cols if c in pd.read_csv(DATA_CSV, nrows=0).columns]
+#         )
+
+#     # PRIMARY_DATE
+#     if "PRIMARY_DATE" not in df.columns:
+#         date_cols = ["RECEIVED_DATE","DECISION_DATE","BEGIN_DATE","ORIGINAL_CERT_DATE","END_DATE"]
+#         df["PRIMARY_DATE"] = pd.NaT
+#         for c in date_cols:
+#             if c in df.columns:
+#                 df["PRIMARY_DATE"] = df["PRIMARY_DATE"].fillna(df[c])
+
+#     # Calendar helpers
+#     if "RECEIVED_YEAR" not in df.columns or df["RECEIVED_YEAR"].isna().all():
+#         df["RECEIVED_YEAR"]  = df["PRIMARY_DATE"].dt.year
+#         df["RECEIVED_MONTH"] = df["PRIMARY_DATE"].dt.to_period("M").astype("string")
+
+#     # Fiscal year helper
+#     if "FISCAL_YEAR" not in df.columns or df["FISCAL_YEAR"].isna().all():
+#         m = df["PRIMARY_DATE"].dt.month
+#         y = df["PRIMARY_DATE"].dt.year
+#         df["FISCAL_YEAR"] = np.where(m >= 10, y + 1, y)
+
+#     # Normalized names
+#     if "EMPLOYER_NAME" in df.columns and "EMPLOYER_NAME_NORM" not in df.columns:
+#         df["EMPLOYER_NAME_NORM"] = df["EMPLOYER_NAME"].apply(norm_text)
+#     if "JOB_TITLE" in df.columns and "JOB_TITLE_NORM" not in df.columns:
+#         df["JOB_TITLE_NORM"] = df["JOB_TITLE"].apply(norm_text)
+#     if "SOC_TITLE" in df.columns and "SOC_TITLE_NORM" not in df.columns:
+#         df["SOC_TITLE_NORM"] = df["SOC_TITLE"].apply(norm_text)
+
+#     # Annual wage
+#     if "WAGE_ANNUAL_FROM" not in df.columns:
+#         def annualize(row):
+#             v = row.get("WAGE_RATE_OF_PAY_FROM")
+#             if pd.isna(v): return pd.NA
+#             unit = str(row.get("WAGE_UNIT_OF_PAY", "")).lower()
+#             if "hour" in unit:   return float(v) * 2080
+#             if "week" in unit:   return float(v) * 52
+#             if "bi" in unit:     return float(v) * 26
+#             if "month" in unit:  return float(v) * 12
+#             if "year" in unit:   return float(v)
+#             return pd.NA
+#         df["WAGE_ANNUAL_FROM"] = df.apply(annualize, axis=1)
+
+#     return df
 
 # ------------------- LOAD THE DATA -------------------
 df = load_data()
