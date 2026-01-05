@@ -16,6 +16,8 @@ st.title("📈 Strategic Talent Migration — LCA")
 # ------------------- DATA FILE PATHS -------------------
 DATA_PARQUET = Path("/tmp/lca_merged_clean.parquet")
 DATA_CSV     = Path("/tmp/lca_merged_clean.csv")
+ETL_ERR_FILE = Path("/tmp/etl_error.txt")
+ETL_OK_FILE  = Path("/tmp/etl_done.ok")
 
 # ------------------- HELPERS -------------------
 def fiscal_year_range(fy: int):
@@ -45,36 +47,59 @@ def _etl_worker():
         st.session_state["etl_done"] = False
 
 @st.cache_resource
-def start_etl_thread_if_needed():
-    """Start ETL in background once per server process."""
+def start_etl_once():
+    """
+    Start ETL exactly once per server process.
+    Writes status to /tmp files (safe for background run).
+    """
+    # If already built, do nothing
     if DATA_PARQUET.exists() or DATA_CSV.exists():
-        return None
+        return True
 
-    t = threading.Thread(target=_etl_worker, daemon=True)
-    t.start()
-    return t
+    # If ETL already finished successfully earlier in this container, do nothing
+    if ETL_OK_FILE.exists():
+        return True
+
+    # Clear previous error
+    try:
+        ETL_ERR_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    # Run ETL (blocking, but only once per container)
+    # IMPORTANT: This runs inside cache_resource so it won't repeat every rerun.
+    try:
+        run_etl()
+        ETL_OK_FILE.write_text("ok")
+        return True
+    except Exception:
+        ETL_ERR_FILE.write_text(traceback.format_exc())
+        return False
 
 def ensure_dataset():
-    """Render UI immediately; ETL runs in background; auto-refresh until data appears."""
+    # If data exists, continue immediately
     if DATA_PARQUET.exists() or DATA_CSV.exists():
         return
 
-    # start background ETL (only once)
-    start_etl_thread_if_needed()
+    st.warning("Dataset not found. Running ETL to generate it…")
 
-    # show status / errors
-    st.warning("Dataset not found. Building it now (ETL in progress)…")
+    ok = start_etl_once()
 
-    err = st.session_state.get("etl_error")
-    if err:
+    # If ETL failed, show error file
+    if not ok:
         st.error("ETL crashed:")
-        st.code(err)
+        if ETL_ERR_FILE.exists():
+            st.code(ETL_ERR_FILE.read_text())
         st.stop()
 
-    # refresh page every 3s until dataset is ready
-    st.caption("Waiting for /tmp/lca_merged_clean.parquet or /tmp/lca_merged_clean.csv …")
-    st.autorefresh(interval=3000, key="etl_refresh")
-    st.stop()
+    # If ETL still didn’t produce files, wait + reload page
+    if not (DATA_PARQUET.exists() or DATA_CSV.exists()):
+        st.caption("ETL is running… this page will refresh automatically.")
+        st.markdown(
+            "<meta http-equiv='refresh' content='3'>",
+            unsafe_allow_html=True
+        )
+        st.stop()
 
 # ------------------- LOAD DATA FUNCTION -------------------
 
