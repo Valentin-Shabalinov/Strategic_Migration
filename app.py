@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import numpy as np
 from datetime import date
+from etl_lca import run_etl
 
 # ------------------- APP CONFIGURATION -------------------
 st.set_page_config(page_title="Talent Migration (LCA)", layout="wide")
@@ -37,11 +38,31 @@ def norm_text(x: str) -> str:
 
 @st.cache_data(show_spinner="Loading LCA dataset…")
 def load_data():
+    # If parquet missing on Streamlit Cloud, try to build it from Excel via ETL
     if not DATA_PARQUET.exists():
-        st.error("Parquet not found: data/lca_merged_clean.parquet")
-        st.stop()
+        st.warning("Parquet not found. Running ETL to generate it (may take a few minutes)…")
+        try:
+            run_etl()
+        except Exception as e:
+            st.error(f"ETL failed: {e}")
 
-    df = pd.read_parquet(DATA_PARQUET)
+    # Prefer parquet
+    if DATA_PARQUET.exists():
+        df = pd.read_parquet(DATA_PARQUET)
+
+    # Fallback to CSV if parquet still missing but CSV exists
+    elif DATA_CSV.exists():
+        date_cols = ["RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE","BEGIN_DATE","END_DATE"]
+        df = pd.read_csv(
+            DATA_CSV,
+            parse_dates=[c for c in date_cols if c in pd.read_csv(DATA_CSV, nrows=0).columns]
+        )
+    else:
+        st.error(
+            "Dataset not found. Please ensure Excel files exist in ./data and ETL can run "
+            "to generate lca_merged_clean.parquet."
+        )
+        st.stop()
 
     # PRIMARY_DATE
     if "PRIMARY_DATE" not in df.columns:

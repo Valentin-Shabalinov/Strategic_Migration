@@ -105,6 +105,10 @@ def load_one(path: Path, source_tag: str) -> pd.DataFrame:
 
     return df
 
+def run_etl():
+    """Run ETL and create OUT_PARQUET/OUT_CSV if possible."""
+    main()
+
 def main():
     srcs = [
         (DATA_DIR / "LCA_Disclosure_Data_FY2024_Q1.xlsx", "FY2024_Q1"),
