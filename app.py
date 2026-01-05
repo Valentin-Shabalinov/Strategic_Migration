@@ -7,6 +7,7 @@ import numpy as np
 from datetime import date
 from etl_lca import run_etl
 import traceback
+import threading
 
 # ------------------- APP CONFIGURATION -------------------
 st.set_page_config(page_title="Talent Migration (LCA)", layout="wide")
@@ -18,16 +19,13 @@ DATA_CSV     = Path("/tmp/lca_merged_clean.csv")
 
 # ------------------- HELPERS -------------------
 def fiscal_year_range(fy: int):
-    """Return start/end dates (inclusive) for a given fiscal year FY.
-       Example: FY2024 => Oct 1, 2023 — Sep 30, 2024"""
     return date(fy - 1, 10, 1), date(fy, 9, 30)
 
 def fiscal_quarter_from_month(m: int) -> int:
-    """Oct-Dec=Q1, Jan-Mar=Q2, Apr-Jun=Q3, Jul-Sep=Q4"""
     if m in (10, 11, 12): return 1
     if m in (1, 2, 3):    return 2
     if m in (4, 5, 6):    return 3
-    return 4  # 7,8,9
+    return 4
 
 def norm_text(x: str) -> str:
     if not isinstance(x, str): return ""
@@ -35,43 +33,60 @@ def norm_text(x: str) -> str:
     x = re.sub(r"\s+", " ", x)
     return x
 
-# ------------------- LOAD DATA FUNCTION -------------------
+# ------------------- ETL (NON-BLOCKING) -------------------
 
-# @st.cache_data(show_spinner="Loading LCA dataset…")
+def _etl_worker():
+    try:
+        run_etl()
+        st.session_state["etl_error"] = None
+        st.session_state["etl_done"] = True
+    except Exception:
+        st.session_state["etl_error"] = traceback.format_exc()
+        st.session_state["etl_done"] = False
+
+@st.cache_resource
+def start_etl_thread_if_needed():
+    """Start ETL in background once per server process."""
+    if DATA_PARQUET.exists() or DATA_CSV.exists():
+        return None
+
+    t = threading.Thread(target=_etl_worker, daemon=True)
+    t.start()
+    return t
+
 def ensure_dataset():
-    """Make sure parquet exists. If not — run ETL (reads Excel from ./data, writes to /tmp)."""
-    if not DATA_PARQUET.exists():
-        st.warning("Parquet not found. Running ETL to generate it (may take a few minutes)…")
-        try:
-            run_etl()
-            st.success("ETL finished.")
-        except Exception:
-            st.error("ETL crashed. See details below.")
-            st.code(traceback.format_exc())
-            raise
+    """Render UI immediately; ETL runs in background; auto-refresh until data appears."""
+    if DATA_PARQUET.exists() or DATA_CSV.exists():
+        return
 
-    # Safety check
-    if not DATA_PARQUET.exists() and not DATA_CSV.exists():
-        st.error(
-            "Dataset not found after ETL. Ensure Excel files exist in ./data "
-            "and ETL can write outputs to /tmp."
-        )
+    # start background ETL (only once)
+    start_etl_thread_if_needed()
+
+    # show status / errors
+    st.warning("Dataset not found. Building it now (ETL in progress)…")
+
+    err = st.session_state.get("etl_error")
+    if err:
+        st.error("ETL crashed:")
+        st.code(err)
         st.stop()
+
+    # refresh page every 3s until dataset is ready
+    st.caption("Waiting for /tmp/lca_merged_clean.parquet or /tmp/lca_merged_clean.csv …")
+    st.autorefresh(interval=3000, key="etl_refresh")
+    st.stop()
+
+# ------------------- LOAD DATA FUNCTION -------------------
 
 @st.cache_data(show_spinner="Loading LCA dataset…")
 def load_data():
-    """Load dataset from /tmp parquet (preferred) or /tmp csv (fallback) and compute helpers."""
     # Prefer parquet
     if DATA_PARQUET.exists():
         df = pd.read_parquet(DATA_PARQUET)
-
-    # Fallback to CSV if parquet missing but CSV exists
     elif DATA_CSV.exists():
         date_cols = ["RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE","BEGIN_DATE","END_DATE"]
-        # avoid reading header twice if you want super-simple:
-        df = pd.read_csv(DATA_CSV, parse_dates=[c for c in date_cols if c in date_cols])
+        df = pd.read_csv(DATA_CSV, parse_dates=date_cols)
     else:
-        # Should not happen because ensure_dataset() handles this
         st.stop()
 
     # PRIMARY_DATE
@@ -103,6 +118,8 @@ def load_data():
         df["JOB_TITLE_NORM"] = norm_series(df["JOB_TITLE"])
     if "SOC_TITLE" in df.columns and "SOC_TITLE_NORM" not in df.columns:
         df["SOC_TITLE_NORM"] = norm_series(df["SOC_TITLE"])
+
+
 
     # Annual wage (vectorized)
     if "WAGE_ANNUAL_FROM" not in df.columns:

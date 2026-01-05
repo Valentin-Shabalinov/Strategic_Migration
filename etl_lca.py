@@ -106,8 +106,46 @@ def load_one(path: Path, source_tag: str) -> pd.DataFrame:
     return df
 
 def run_etl():
-    """Run ETL and create OUT_PARQUET/OUT_CSV if possible."""
-    main()
+    print("ETL: starting")
+    print("ETL: DATA_DIR =", DATA_DIR.resolve())
+    print("ETL: OUT_PARQUET =", OUT_PARQUET)
+    print("ETL: OUT_CSV =", OUT_CSV)
+
+    srcs = [
+        (DATA_DIR / "LCA_Disclosure_Data_FY2024_Q1.xlsx", "FY2024_Q1"),
+        (DATA_DIR / "LCA_Disclosure_Data_FY2023_Q4.xlsx", "FY2023_Q4"),
+    ]
+
+    frames = []
+    for path, tag in srcs:
+        print("ETL: reading", path, "exists =", path.exists())
+        frames.append(load_one(path, tag))
+
+    merged = pd.concat(frames, ignore_index=True)
+
+    merged["_sort_key"] = merged["DECISION_DATE"].fillna(merged["RECEIVED_DATE"])
+    merged = (
+        merged.sort_values("_sort_key")
+              .drop_duplicates(subset=["CASE_NUMBER"], keep="last")
+              .drop(columns=["_sort_key"])
+    )
+
+    print(f"ETL: rows after merge & dedup: {len(merged):,}")
+
+    OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+
+    merged.to_csv(OUT_CSV, index=False)
+    print("ETL: saved CSV", OUT_CSV, "exists =", OUT_CSV.exists())
+
+    for c in merged.columns:
+        if pd.api.types.is_object_dtype(merged[c]) or pd.api.types.is_string_dtype(merged[c]):
+            merged[c] = merged[c].astype("string")
+
+    merged.to_parquet(OUT_PARQUET, index=False, compression="snappy")
+    print("ETL: saved PARQUET", OUT_PARQUET, "exists =", OUT_PARQUET.exists())
+
+    print("ETL: done")
+    return OUT_PARQUET
 
 def main():
     srcs = [
