@@ -11,7 +11,7 @@ import streamlit as st
 # ------------------- APP CONFIG -------------------
 st.set_page_config(page_title="Strategic Talent Migration — LCA", layout="wide")
 st.title("📈 Strategic Talent Migration — LCA")
-st.caption("Who hires foreign talent in the US, where, and at what pay — based on official LCA filings.")
+# st.caption("Who hires foreign talent in the US, where, and at what pay — based on official LCA filings.")
 st.caption("Interactive dashboard based on LCA disclosure data (Labor Condition Applications).")
 
 
