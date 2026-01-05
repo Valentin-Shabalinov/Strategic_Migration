@@ -6,14 +6,15 @@ import re
 import numpy as np
 from datetime import date
 from etl_lca import run_etl
+import traceback
 
 # ------------------- APP CONFIGURATION -------------------
 st.set_page_config(page_title="Talent Migration (LCA)", layout="wide")
 st.title("📈 Strategic Talent Migration — LCA")
 
 # ------------------- DATA FILE PATHS -------------------
-DATA_PARQUET = Path("data/lca_merged_clean.parquet")
-DATA_CSV     = Path("data/lca_merged_clean.csv")
+DATA_PARQUET = Path("/tmp/lca_merged_clean.parquet")
+DATA_CSV     = Path("/tmp/lca_merged_clean.csv")
 
 # ------------------- HELPERS -------------------
 def fiscal_year_range(fy: int):
@@ -36,32 +37,41 @@ def norm_text(x: str) -> str:
 
 # ------------------- LOAD DATA FUNCTION -------------------
 
-@st.cache_data(show_spinner="Loading LCA dataset…")
-def load_data():
-    # If parquet missing on Streamlit Cloud, try to build it from Excel via ETL
+# @st.cache_data(show_spinner="Loading LCA dataset…")
+def ensure_dataset():
+    """Make sure parquet exists. If not — run ETL (reads Excel from ./data, writes to /tmp)."""
     if not DATA_PARQUET.exists():
         st.warning("Parquet not found. Running ETL to generate it (may take a few minutes)…")
         try:
             run_etl()
-        except Exception as e:
-            st.error(f"ETL failed: {e}")
+            st.success("ETL finished.")
+        except Exception:
+            st.error("ETL crashed. See details below.")
+            st.code(traceback.format_exc())
+            raise
 
+    # Safety check
+    if not DATA_PARQUET.exists() and not DATA_CSV.exists():
+        st.error(
+            "Dataset not found after ETL. Ensure Excel files exist in ./data "
+            "and ETL can write outputs to /tmp."
+        )
+        st.stop()
+
+@st.cache_data(show_spinner="Loading LCA dataset…")
+def load_data():
+    """Load dataset from /tmp parquet (preferred) or /tmp csv (fallback) and compute helpers."""
     # Prefer parquet
     if DATA_PARQUET.exists():
         df = pd.read_parquet(DATA_PARQUET)
 
-    # Fallback to CSV if parquet still missing but CSV exists
+    # Fallback to CSV if parquet missing but CSV exists
     elif DATA_CSV.exists():
         date_cols = ["RECEIVED_DATE","DECISION_DATE","ORIGINAL_CERT_DATE","BEGIN_DATE","END_DATE"]
-        df = pd.read_csv(
-            DATA_CSV,
-            parse_dates=[c for c in date_cols if c in pd.read_csv(DATA_CSV, nrows=0).columns]
-        )
+        # avoid reading header twice if you want super-simple:
+        df = pd.read_csv(DATA_CSV, parse_dates=[c for c in date_cols if c in date_cols])
     else:
-        st.error(
-            "Dataset not found. Please ensure Excel files exist in ./data and ETL can run "
-            "to generate lca_merged_clean.parquet."
-        )
+        # Should not happen because ensure_dataset() handles this
         st.stop()
 
     # PRIMARY_DATE
@@ -113,6 +123,10 @@ def load_data():
         df["WAGE_ANNUAL_FROM"] = v * mult
 
     return df
+
+ensure_dataset()
+df = load_data()
+
 
 
 # @st.cache_data
