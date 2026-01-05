@@ -1,6 +1,6 @@
 import re
 from datetime import date
-from pathlib import Path
+# from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -15,8 +15,11 @@ st.caption("Interactive dashboard based on LCA disclosure data (Labor Condition 
 
 
 # ------------------- DATA PATHS -------------------
-DATA_PARQUET = Path("data/lca_merged_clean.parquet")
-DATA_CSV = Path("data/lca_merged_clean.csv")
+# DATA_PARQUET = Path("data/lca_merged_clean.parquet")
+# DATA_CSV = Path("data/lca_merged_clean.csv")
+
+DATA_URL = "https://huggingface.co/datasets/Valentinsf/lca-disclosure-data/resolve/main/lca_merged_clean.parquet"
+
 
 
 # ------------------- HELPERS -------------------
@@ -41,14 +44,15 @@ def norm_series(s: pd.Series) -> pd.Series:
 
 @st.cache_data(show_spinner="Loading dataset…")
 def load_data() -> pd.DataFrame:
-    if DATA_PARQUET.exists():
-        df = pd.read_parquet(DATA_PARQUET)
-    elif DATA_CSV.exists():
-        # Read once; then convert date columns safely
-        df = pd.read_csv(DATA_CSV)
-    else:
-        st.error("Dataset not found. Put file into /data: lca_merged_clean.parquet or lca_merged_clean.csv")
-        st.stop()
+    # if DATA_PARQUET.exists():
+    #     df = pd.read_parquet(DATA_PARQUET)
+    # elif DATA_CSV.exists():
+    #     # Read once; then convert date columns safely
+    #     df = pd.read_csv(DATA_CSV)
+    # else:
+    #     st.error("Dataset not found. Put file into /data: lca_merged_clean.parquet or lca_merged_clean.csv")
+    #     st.stop()
+    df = pd.read_parquet(DATA_URL)
 
     # Ensure date columns
     date_cols = ["RECEIVED_DATE", "DECISION_DATE", "ORIGINAL_CERT_DATE", "BEGIN_DATE", "END_DATE", "PRIMARY_DATE"]
