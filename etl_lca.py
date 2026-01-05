@@ -18,8 +18,8 @@ from pathlib import Path
 
 # ------------------- PATHS -------------------
 DATA_DIR = Path("data")  # Directory containing raw and processed files
-OUT_CSV = DATA_DIR / "lca_merged_clean.csv"
-OUT_PARQUET = DATA_DIR / "lca_merged_clean.parquet"
+OUT_CSV = Path("/tmp") / "lca_merged_clean.csv"
+OUT_PARQUET = Path("/tmp") / "lca_merged_clean.parquet"
 
 # ------------------- TARGET COLUMNS -------------------
 TARGET_COLS = [
